@@ -1,0 +1,1 @@
+Just a simple toy program to try implemnenting a custom system that resembles shred but with resources being described using runtime bitmasks instead of typed generics
