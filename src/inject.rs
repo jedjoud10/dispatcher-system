@@ -17,12 +17,12 @@ impl<'a, E> InjectionOrder<'a, E> {
     }
 
     pub fn writes(mut self, mask: ResourceMask) -> Self {
-        self.internal.writes.add(mask);
+        self.internal.writes |= mask;
         self
     }
 
     pub fn reads(mut self, mask: ResourceMask) -> Self {
-        self.internal.reads.add(mask);
+        self.internal.reads |= mask;
         self
     }
 
