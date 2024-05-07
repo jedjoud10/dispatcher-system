@@ -14,6 +14,7 @@ use world::*;
 
 struct ResourceA;
 struct ResourceB;
+struct ResourceC;
 
 // must execute after B
 fn system_a(w: &World) {}
@@ -21,10 +22,10 @@ fn system_a(w: &World) {}
 // rando execution
 fn system_b(w: &World) {}
 
-// rando execution (should merge with B)
+// rando execution (could merge with B)
 fn system_c(w: &World) {}
 
-// rando execution (should NOT merge with neither B or C)
+// rando execution (could merge with B)
 fn system_d(w: &World) {}
 
 fn main() {
@@ -58,18 +59,18 @@ fn main() {
         .after(system_b)
         .reads(ResourceA::mask());
 
-    // insert system B, which must read from ResourceA
-    registry.insert(system_b)
-        .reads(ResourceA::mask());
+    // insert system B, which does nothing... :3
+    registry.insert(system_b);
 
-    // insert system C, which must read from A and B
     registry.insert(system_c)
         .reads(ResourceA::mask())
         .reads(ResourceB::mask());
 
-    // insert system D, which writes to B after C
     registry.insert(system_d)
-        .writes(ResourceB::mask());
+        .writes(ResourceC::mask());
+
+    registry.insert(|w| {})
+        .after(system_a);
     
     let dispatcher = registry.sort();
     dispatcher.dispatch(6, Arc::new(World::default()))

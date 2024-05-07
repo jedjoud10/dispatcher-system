@@ -39,7 +39,7 @@ impl<E> UnfinishedRegistry<E> {
         let mut output = AHashMap::<StageId, usize>::new();
         let mut graph = Graph::<StageId, &InjectionRule>::new();
 
-        let temp_vec = self.systems.iter().collect::<Vec<_>>();
+        let mut temp_vec = self.systems.iter().collect::<Vec<_>>();
         let mut nodes = temp_vec.iter()
             .map(|node| (*node.0, graph.add_node(*node.0)))
             .collect::<AHashMap<_, _>>();
@@ -81,14 +81,22 @@ impl<E> UnfinishedRegistry<E> {
         // Get the "depths" of each node assuming constant edge weights
         // This allows us to get adjacent sibling systems that we can merge if we have correct resource masks
         let path = k_shortest_path(&graph, user, None, 1, |x| 1);
-        for (index, depth) in path {
-            println!("{} {}", graph[index].name, depth);
-            let (stage_id, _) = nodes.iter().find(|x| *x.1 == index).unwrap();
+        let mut path_sorted = path.iter().map(|(idx, temp)| {
+            (idx, temp, self.systems.get(&graph[*idx]).map(|a| a.reads.count_ones() + a.writes.count_ones()).unwrap_or_default())
+        }).collect::<Vec<_>>();
 
+        path_sorted.sort_by_key(|(_, _, count)| {
+            *count
+        });
+
+        for (&index, &depth, resource_acces_counts) in path_sorted.iter() {
+            let (stage_id, _) = nodes.iter().find(|x| *x.1 == index).unwrap();
+            
             let Some(internal) = self.systems.get(stage_id) else {
                 continue;
             };
-
+            
+            println!("{} {} {}", graph[index].name, depth, resource_acces_counts);
             let node_reads = internal.reads;
             let node_writes = internal.writes;
 
@@ -97,7 +105,7 @@ impl<E> UnfinishedRegistry<E> {
             // 2) non intersecting read/writes
 
             // within a group, there should be shared access to all read resources, but unique access to all write resources
-            let group_index = groups.iter().position(|(group_depth, group_reads, group_writes, nodes)| {
+            let group_index = groups.iter().position(|(group_depth, group_reads, group_writes, _)| {
                 let deptho = *group_depth == depth;
 
                 // check for ref-mut collisions
@@ -124,6 +132,9 @@ impl<E> UnfinishedRegistry<E> {
             println!("Index: {i}, Depth {depth}, R: {:#06b}, W: {:#06b}", *reads, *writes)
         }
 
+        // Groups that the threads should execute
+        // Separated into the systems that should be executed in parallel
+
         // Topoligcally sort the graph (stage ordering)
         let mut topo = Topo::new(&graph);
         let mut counter = 0;
@@ -132,7 +143,7 @@ impl<E> UnfinishedRegistry<E> {
             output.insert(*balls.0, counter);
             counter += 1;
             let group = groups.iter().position(|x| x.3.contains(&node));
-            println!("System: {}, group: {:?}", graph[node].name, group);
+            println!("System: {}, group: {:?}, depth: {}", graph[node].name, group, path[&node]);
         }
 
 
