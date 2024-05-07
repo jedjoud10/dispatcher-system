@@ -15,6 +15,14 @@ use world::*;
 struct ResourceA;
 struct ResourceB;
 struct ResourceC;
+struct Scene;
+struct Renderer;
+struct Graphics;
+struct Audio;
+struct Hierarchy;
+struct Physics;
+struct Input;
+struct IO;
 
 // must execute after B
 fn system_a(w: &World) {}
@@ -53,11 +61,10 @@ fn main() {
     */    
 
     let mut registry = UnfinishedRegistry::<()>::default();
-
-    // insert system A, which must execute after system B, and must read from the "ResourceA" resource
+    /*
     registry.insert(system_a)
-        .after(system_b)
-        .reads(ResourceA::mask());
+        .after(system_c)
+        .before(system_b);
 
     // insert system B, which does nothing... :3
     registry.insert(system_b);
@@ -67,10 +74,27 @@ fn main() {
         .reads(ResourceB::mask());
 
     registry.insert(system_d)
-        .writes(ResourceC::mask());
+        .writes(ResourceC::mask())
+        .writes(ResourceA::mask());
+    */
 
     registry.insert(|w| {})
-        .after(system_a);
+        .writes(Scene::mask())
+        .reads(Scene::mask() | Graphics::mask());
+    registry.insert(|w| {})
+    .writes(Scene::mask())
+        .reads(Graphics::mask());
+    registry.insert(|w| {})
+        .writes(Scene::mask());
+    registry.insert(|w| {})
+        .reads(Scene::mask())
+        .writes(Audio::mask());
+    registry.insert(|w| {})
+        .reads(Scene::mask())
+        .reads(Input::mask())
+        .writes(IO::mask());
+
+    registry.insert(|w| {});
     
     let dispatcher = registry.sort();
     dispatcher.dispatch(6, Arc::new(World::default()))

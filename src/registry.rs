@@ -1,5 +1,6 @@
-use std::{any::TypeId, marker::PhantomData, sync::{Arc, Barrier}, thread::ThreadId};
+use std::{any::TypeId, fmt::Display, hash::{Hash, Hasher}, marker::PhantomData, sync::{Arc, Barrier}, thread::ThreadId};
 use ahash::AHashMap;
+use ascii_table::AsciiTable;
 use petgraph::{algo::k_shortest_path, graph::NodeIndex, visit::{Bfs, DfsPostOrder, Topo}, Direction, Graph};
 
 use crate::{dispatcher::Dispatcher, inject::InjectionOrder, rules::{default_rules, post_user, user, InjectionRule}, stage::StageId, world::World, ResourceMask};
@@ -40,6 +41,7 @@ impl<E> UnfinishedRegistry<E> {
         let mut graph = Graph::<StageId, &InjectionRule>::new();
 
         let mut temp_vec = self.systems.iter().collect::<Vec<_>>();
+        temp_vec.sort_by_key(|x| x.0);
         let mut nodes = temp_vec.iter()
             .map(|node| (*node.0, graph.add_node(*node.0)))
             .collect::<AHashMap<_, _>>();
@@ -68,7 +70,6 @@ impl<E> UnfinishedRegistry<E> {
                     // dir: a -> b.
                     // dir: reference -> this
                     InjectionRule::After(_) => graph.add_edge(reference, this, rule),
-                    InjectionRule::Parallel(_) => todo!(),
                 };
             }
         }
@@ -85,8 +86,23 @@ impl<E> UnfinishedRegistry<E> {
             (idx, temp, self.systems.get(&graph[*idx]).map(|a| a.reads.count_ones() + a.writes.count_ones()).unwrap_or_default())
         }).collect::<Vec<_>>();
 
-        path_sorted.sort_by_key(|(_, _, count)| {
-            *count
+        
+        // TODO: Sort the graph to minimize system fragmentation so that we can merge as many systems as possible together
+        // Must apply some "weight" to the nodes so that nodes WITHOUT dependants are executed first (if dependency tree allows)
+        // This way we can execute all similar systems first, then we can start subdividing down
+
+        // FIX: Easiest fix would be to sort the systems based on rule set (so systems with similar rules are together)
+        // unfortunately this system shits itself when the user defines more rules than necessary (as that would change their hash and ordering n shit) 
+        path_sorted.sort_by_key(|(x, _, count)| {
+            if **x == user || **x == post_user {
+                return 0;
+            } 
+
+            let id = graph[**x];
+            let internal = &self.systems[&id];
+            let mut hash = ahash::AHasher::default();
+            internal.rules.hash(&mut hash);
+            hash.finish()
         });
 
         for (&index, &depth, resource_acces_counts) in path_sorted.iter() {
@@ -135,22 +151,69 @@ impl<E> UnfinishedRegistry<E> {
         // Groups that the threads should execute
         // Separated into the systems that should be executed in parallel
 
-        // TODO: Sort the graph to minimize system fragmentation so that we can merge as many systems as possible together
-        // Must apply some "weight" to the nodes so that nodes WITHOUT dependants are executed first (if dependency tree allows)
-        // This way we can execute all similar systems first, then we can start subdividing down
 
         // Topoligcally sort the graph (stage ordering)
         let mut topo = Topo::new(&graph);
         let mut counter = 0;
+        let mut ascii_table = AsciiTable::default();
+        let mut data = Vec::<Vec<String>>::default();
+        
+        for i in 0..6 {
+            let a = format!("Thread: {i}");
+            data.push(vec![a]);
+
+        }
+        
+        let mut last_group = None;
+        let mut exec_counter = 0;
+
+        // column based table to know what to execute in parallel
+        let mut parralellinino = Vec::<Vec::<StageId>>::default();
+        
+
         while let Some(node) = topo.next(&graph) {
-            let balls = nodes.iter().find(|x| *x.1 == node).unwrap();
-            output.insert(*balls.0, counter);
+            if (node == user || node == post_user) {
+                continue;
+            }
+
+            let (stage, _) = nodes.iter().find(|x| *x.1 == node).unwrap();
+            output.insert(*stage, counter);
+
+            //let name = &stage.name.split("::").last().unwrap();
             counter += 1;
+            
+            let mut thread = 0;
+            
             let group = groups.iter().position(|x| x.3.contains(&node));
-            println!("System: {}, group: {:?}, depth: {}", graph[node].name, group, path[&node]);
+            if let Some(i) = group {
+                thread = groups[i].3.iter().position(|x| *x == node).unwrap();
+                if last_group == Some(i) {
+                    parralellinino[exec_counter-1].push(*stage);
+                } else {
+                    exec_counter += 1;
+                    parralellinino.push(vec![*stage]);
+                }
+
+                last_group = Some(i);
+            }
+
+            println!("System: {}, group: {:?}, depth: {}, thread {thread}", graph[node].name, group, path[&node]);
         }
 
+        let mut ascii_table = AsciiTable::default();
+        for (i, execs) in parralellinino.into_iter().enumerate() {
+            ascii_table.column(i+1).set_header(format!("{i}"));
 
+            for j in 0..6 {
+                if let Some(x) = execs.get(j) {
+                    let name = &x.name.split("::").last().unwrap();
+                    data[j].push(name.to_string());
+                } else {
+                    data[j].push("__".to_string());
+                }
+            }
+        }
+        ascii_table.print(data);
 
         Dispatcher {
             per_thread: todo!(),
