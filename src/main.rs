@@ -24,6 +24,9 @@ fn system_b(w: &World) {}
 // rando execution (should merge with B)
 fn system_c(w: &World) {}
 
+// rando execution (should NOT merge with neither B or C)
+fn system_d(w: &World) {}
+
 fn main() {
     /*
     let mut graph = Graph::<&'static str, u32>::new();
@@ -59,9 +62,14 @@ fn main() {
     registry.insert(system_b)
         .reads(ResourceA::mask());
 
-    // insert system C, which must read from ResourceA
+    // insert system C, which must read from A and B
     registry.insert(system_c)
-        .reads(ResourceA::mask());
+        .reads(ResourceA::mask())
+        .reads(ResourceB::mask());
+
+    // insert system D, which writes to B after C
+    registry.insert(system_d)
+        .writes(ResourceB::mask());
     
     let dispatcher = registry.sort();
     dispatcher.dispatch(6, Arc::new(World::default()))

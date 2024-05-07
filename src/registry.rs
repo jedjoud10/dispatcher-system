@@ -85,11 +85,10 @@ impl<E> UnfinishedRegistry<E> {
             println!("{} {}", graph[index].name, depth);
             let (stage_id, _) = nodes.iter().find(|x| *x.1 == index).unwrap();
 
-            if (!self.systems.contains_key(stage_id)) {
+            let Some(internal) = self.systems.get(stage_id) else {
                 continue;
-            }
+            };
 
-            let internal = &self.systems[stage_id];
             let node_reads = internal.reads;
             let node_writes = internal.writes;
 
@@ -102,7 +101,7 @@ impl<E> UnfinishedRegistry<E> {
                 let deptho = *group_depth == depth;
 
                 // check for ref-mut collisions
-                let ref_mut_collisions = (node_reads | node_writes) & group_writes == 0;
+                let ref_mut_collisions = (node_reads | node_writes) & group_writes == 0 && ((node_writes) & group_reads == 0);
 
                 // check for mut-mut collisions
                 let mut_mut_collisions = (node_writes & group_writes) == 0;

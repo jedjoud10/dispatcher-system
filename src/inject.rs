@@ -18,6 +18,7 @@ impl<'a, E> InjectionOrder<'a, E> {
 
     pub fn writes(mut self, mask: ResourceMask) -> Self {
         self.internal.writes |= mask;
+        self.internal.reads |= mask;
         self
     }
 
