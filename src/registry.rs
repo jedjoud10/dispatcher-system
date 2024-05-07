@@ -135,6 +135,10 @@ impl<E> UnfinishedRegistry<E> {
         // Groups that the threads should execute
         // Separated into the systems that should be executed in parallel
 
+        // TODO: Sort the graph to minimize system fragmentation so that we can merge as many systems as possible together
+        // Must apply some "weight" to the nodes so that nodes WITHOUT dependants are executed first (if dependency tree allows)
+        // This way we can execute all similar systems first, then we can start subdividing down
+
         // Topoligcally sort the graph (stage ordering)
         let mut topo = Topo::new(&graph);
         let mut counter = 0;
