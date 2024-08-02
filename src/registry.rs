@@ -6,7 +6,7 @@ use petgraph::{algo::k_shortest_path, graph::NodeIndex, visit::{Bfs, DfsPostOrde
 use crate::{dispatcher::Dispatcher, inject::InjectionOrder, rules::{default_rules, post_user, user, InjectionRule}, stage::StageId, world::World, ResourceMask};
 
 pub(crate) struct Internal {
-    pub(crate) boxed: Box<dyn FnMut(&World)>,
+    pub(crate) boxed: Box<dyn FnMut(&World) + Sync + Send>,
     pub(crate) rules: Vec<InjectionRule>,
     pub(crate) reads: ResourceMask,
     pub(crate) writes: ResourceMask,
@@ -19,7 +19,7 @@ pub struct UnfinishedRegistry<E> {
 }
 
 impl<E> UnfinishedRegistry<E> {
-    pub fn insert<S: FnMut(&World) + 'static>(&mut self, system: S) -> InjectionOrder<E> {
+    pub fn insert<S: FnMut(&World) + Sync + Send + 'static>(&mut self, system: S) -> InjectionOrder<E> {
         let rules = default_rules();
         let stage = StageId::fetch(&system);
         self.systems.insert(stage, Internal {
@@ -36,9 +36,9 @@ impl<E> UnfinishedRegistry<E> {
     // 1) make sure ordering constraint is held (sys a before sys b)
     // 2) make sure no intersecting RW masks
     // 3) (optional) optimize RW masks to improve concurrency
-    pub fn sort(self) -> Dispatcher {
-        let mut output = AHashMap::<StageId, usize>::new();
+    pub fn sort(mut self) -> Dispatcher {
         let mut graph = Graph::<StageId, &InjectionRule>::new();
+        let thread_count = num_cpus::get();
 
         let mut temp_vec = self.systems.iter().collect::<Vec<_>>();
         temp_vec.sort_by_key(|x| x.0);
@@ -93,7 +93,7 @@ impl<E> UnfinishedRegistry<E> {
 
         // FIX: Easiest fix would be to sort the systems based on rule set (so systems with similar rules are together)
         // unfortunately this system shits itself when the user defines more rules than necessary (as that would change their hash and ordering n shit) 
-        path_sorted.sort_by_key(|(x, _, count)| {
+        path_sorted.sort_by_key(|(x, _, _)| {
             if **x == user || **x == post_user {
                 return 0;
             } 
@@ -105,20 +105,24 @@ impl<E> UnfinishedRegistry<E> {
             hash.finish()
         });
 
-        for (&index, &depth, resource_acces_counts) in path_sorted.iter() {
+        // this will batch the system into their "group" batches where they can execute in parallel with other systems
+        // without overlapping their resource bitmasks
+        for (&index, &depth, _) in path_sorted.iter() {
             let (stage_id, _) = nodes.iter().find(|x| *x.1 == index).unwrap();
             
             let Some(internal) = self.systems.get(stage_id) else {
                 continue;
             };
             
-            println!("{} {} {}", graph[index].name, depth, resource_acces_counts);
             let node_reads = internal.reads;
             let node_writes = internal.writes;
+            println!("System: {} Depth: {} R: {:#06b}, W: {:#06b}", graph[index].name, depth, node_reads, node_writes);
 
             // must find group with the following requirements:
             // 1) same depth as current node depth
             // 2) non intersecting read/writes
+
+            // one could even write a custom heuristic function here to split off systems within groups if needed
 
             // within a group, there should be shared access to all read resources, but unique access to all write resources
             let group_index = groups.iter().position(|(group_depth, group_reads, group_writes, _)| {
@@ -133,7 +137,7 @@ impl<E> UnfinishedRegistry<E> {
                 deptho && ref_mut_collisions && mut_mut_collisions
             });
 
-            // if missing, add
+            // if the group is missing, add it, otherwise just modify the current group
             if let Some(group_index) = group_index {
                 let (_, read, writes, nodes) = &mut groups[group_index];
                 *read |= node_reads;
@@ -148,63 +152,49 @@ impl<E> UnfinishedRegistry<E> {
             println!("Index: {i}, Depth {depth}, R: {:#06b}, W: {:#06b}", *reads, *writes)
         }
 
-        // Groups that the threads should execute
-        // Separated into the systems that should be executed in parallel
-
-
         // Topoligcally sort the graph (stage ordering)
         let mut topo = Topo::new(&graph);
-        let mut counter = 0;
-        let mut ascii_table = AsciiTable::default();
         let mut data = Vec::<Vec<String>>::default();
         
-        for i in 0..6 {
-            let a = format!("Thread: {i}");
+        for i in 0..thread_count {
+            let a = format!("Thread: {}", i+1);
             data.push(vec![a]);
-
         }
         
         let mut last_group = None;
         let mut exec_counter = 0;
 
         // column based table to know what to execute in parallel
-        let mut parralellinino = Vec::<Vec::<StageId>>::default();
+        let mut execution_matrix_cm = Vec::<Vec::<StageId>>::default();
         
 
         while let Some(node) = topo.next(&graph) {
-            if (node == user || node == post_user) {
+            if node == user || node == post_user {
                 continue;
             }
 
             let (stage, _) = nodes.iter().find(|x| *x.1 == node).unwrap();
-            output.insert(*stage, counter);
-
-            //let name = &stage.name.split("::").last().unwrap();
-            counter += 1;
-            
-            let mut thread = 0;
             
             let group = groups.iter().position(|x| x.3.contains(&node));
             if let Some(i) = group {
-                thread = groups[i].3.iter().position(|x| *x == node).unwrap();
                 if last_group == Some(i) {
-                    parralellinino[exec_counter-1].push(*stage);
+                    execution_matrix_cm[exec_counter-1].push(*stage);
                 } else {
                     exec_counter += 1;
-                    parralellinino.push(vec![*stage]);
+                    execution_matrix_cm.push(vec![*stage]);
                 }
 
                 last_group = Some(i);
             }
 
-            println!("System: {}, group: {:?}, depth: {}, thread {thread}", graph[node].name, group, path[&node]);
+            println!("System: {}, group: {:?}, depth: {}", graph[node].name, group, path[&node]);
         }
 
         let mut ascii_table = AsciiTable::default();
-        for (i, execs) in parralellinino.into_iter().enumerate() {
+        for (i, execs) in execution_matrix_cm.iter().enumerate() {
             ascii_table.column(i+1).set_header(format!("{i}"));
 
-            for j in 0..6 {
+            for j in 0..thread_count {
                 if let Some(x) = execs.get(j) {
                     let name = &x.name.split("::").last().unwrap();
                     data[j].push(name.to_string());
@@ -215,8 +205,23 @@ impl<E> UnfinishedRegistry<E> {
         }
         ascii_table.print(data);
 
+        // must convert the column major data to row major so each thread has to worry about its own data only
+        let mut per_thread = Vec::<Vec<Option<Box<dyn FnMut(&World) + Sync + Send>>>>::default();
+        for i in 0..thread_count {
+            per_thread.push(Vec::new());
+        }
+
+        for parallel in execution_matrix_cm {
+            for i in 0..thread_count {
+                let system = parallel.get(i).map(|i| self.systems.remove(i).map(|x| x.boxed).unwrap());
+                per_thread[i].push(system);
+            }
+        }
+
+        per_thread.retain(|x| x.iter().any(|x| x.is_some()));
         Dispatcher {
-            per_thread: todo!(),
+            per_thread,
+            handles: Default::default(),
         }
     }
 }

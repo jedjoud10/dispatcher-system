@@ -1,34 +1,35 @@
-use std::sync::{Arc, Barrier};
+use std::{sync::{Arc, Barrier}, thread::JoinHandle};
 
 use crate::World;
 
 #[derive(Default)]
 pub struct Dispatcher {
-
-    pub(crate) per_thread: Vec<Vec<Box<dyn FnMut(&World) + Sync + Send>>>,
+    pub(crate) per_thread: Vec<Vec<Option<Box<dyn FnMut(&World) + Sync + Send>>>>,
+    pub(crate) handles: Vec<JoinHandle<()>>,
 }
 
 impl Dispatcher {
-    pub fn dispatch(self, threads: usize, world: Arc<World>) {
-        let mut per_thread = self.per_thread;
-        let group = Arc::new(Barrier::new(threads));
+    pub fn dispatch(mut self, world: Arc<World>) {
+        let group = Arc::new(Barrier::new(self.per_thread.len()));
 
-        for i in 0..threads {
+        for (_, mut data) in self.per_thread.into_iter().enumerate() {
             let barrier = group.clone();
-            let mut data = per_thread.remove(0);
             let world = world.clone();
-            std::thread::spawn(move || {
+            let handle = std::thread::spawn(move || {
                 loop {
-                    /*
                     for group in data.iter_mut() {
                         barrier.wait();
                         if let Some(func) = group {
                             func(&world);
                         }
                     }
-                    */
                 }
             });
+            self.handles.push(handle);
+        }
+
+        for i in self.handles {
+            i.join().unwrap();
         }
     }
 }

@@ -38,9 +38,6 @@ impl<T: Any + Sync + Send + 'static> Resource for T {
     }
 }
 
-pub type BoxedResource = Box<dyn Resource>;
-
-
 // Registered components
 lazy_static! {
     static ref NEXT: Mutex<u64> = Mutex::new(1);
