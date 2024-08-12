@@ -1,4 +1,4 @@
-use parking_lot::RwLock;
+use parking_lot::{Condvar, RwLock};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -12,31 +12,32 @@ use crate::{Internal, InternalData, World};
 pub struct Dispatcher {
     pub(crate) handles: Vec<JoinHandle<()>>,
     pub(crate) global_barrier: Arc<Barrier>,
-    quit: Arc<AtomicBool>,
+    pub(crate) var: Arc<AtomicBool>,
 }
 
 impl Dispatcher {
-    pub(crate) fn build(per_thread: Vec<Vec<Option<Internal>>>, world: Arc<RwLock<World>>) -> Self {
+    pub(crate) fn build(per_thread: Vec<Vec<Option<Internal>>>, world: Arc<World>) -> Self {
         let total = per_thread.len();
+        log::debug!("Total: {total}");
+        let var = Arc::new(AtomicBool::new(false));
         let group_barrier = Arc::new(Barrier::new(total));
         let global_barrier = Arc::new(Barrier::new(total + 1));
-        let var = Arc::new(AtomicBool::new(false));
         let mut handles = Vec::<JoinHandle<()>>::new();
 
         for (i, mut data) in per_thread.into_iter().enumerate() {
             let group_barrier = group_barrier.clone();
             let global_barrier = global_barrier.clone();
-            let var = var.clone();
             let world = world.clone();
             let builder = std::thread::Builder::new().name(format!("thread-{i}"));
+            let var = var.clone();
             let handle = builder
                 .spawn(move || {
                     loop {
-                        if var.load(Ordering::Relaxed) {
-                            //break;
-                        }
-
                         global_barrier.wait();
+
+                        if var.load(Ordering::Relaxed) {
+                            break;
+                        }
 
                         for group in data.iter_mut() {
                             group_barrier.wait();
@@ -47,7 +48,6 @@ impl Dispatcher {
                                 ..
                             }) = group
                             {
-                                let world = world.read();
                                 let data = InternalData {
                                     read: *reads,
                                     write: *writes,
@@ -67,9 +67,9 @@ impl Dispatcher {
         }
 
         Self {
-            handles: Vec::default(),
+            handles,
             global_barrier,
-            quit: var,
+            var,
         }
     }
 
@@ -81,9 +81,9 @@ impl Dispatcher {
 
 impl Drop for Dispatcher {
     fn drop(&mut self) {
-        self.quit.store(true, Ordering::Relaxed);
+        self.var.store(true, Ordering::Relaxed);
+        self.global_barrier.wait();
         for thread in self.handles.drain(..) {
-            println!("Bruh");
             thread.join().unwrap();
         }
     }

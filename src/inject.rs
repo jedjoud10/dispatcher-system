@@ -1,5 +1,5 @@
 use crate::{
-    resources::ResourceMask, rules::InjectionRule, stage::StageId, world::World, Internal,
+    resources::ResourceMask, rules::InjectionRule, stage::StageId, world::World, Internal, Resource,
 };
 use std::marker::PhantomData;
 
@@ -18,15 +18,23 @@ impl<'a, E> InjectionOrder<'a, E> {
         }
     }
 
-    pub fn writes(self, mask: ResourceMask) -> Self {
+    pub fn writes_mask(self, mask: ResourceMask) -> Self {
         self.internal.writes |= mask;
         self.internal.reads |= mask;
         self
     }
 
-    pub fn reads(self, mask: ResourceMask) -> Self {
+    pub fn reads_mask(self, mask: ResourceMask) -> Self {
         self.internal.reads |= mask;
         self
+    }
+
+    pub fn writes<R: Resource>(self) -> Self {
+        self.writes_mask(R::mask())
+    }
+
+    pub fn reads<R: Resource>(self) -> Self {
+        self.reads_mask(R::mask())
     }
 
     fn reset_defaults(&mut self) {

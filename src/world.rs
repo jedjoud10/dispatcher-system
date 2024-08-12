@@ -18,6 +18,7 @@ impl World {
         static INTERNAL: RefCell<Option<InternalData>> = const { RefCell::new(None) };
     }
 
+    // Insert a resource to the world before we lock it up inside an Arc to be banished to the immutable realm
     pub fn insert<R: Resource>(&mut self, resource: R) {
         let id = TypeId::of::<R>();
         self.resources.insert(id, RwLock::new(Box::new(resource)));

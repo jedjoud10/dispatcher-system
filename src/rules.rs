@@ -20,9 +20,9 @@ impl InjectionRule {
     }
 }
 
-pub fn user(world: &World) {}
+pub fn user(_: &World) {}
 
-pub fn post_user(world: &World) {}
+pub fn post_user(_: &World) {}
 
 // Create the default rules for a default node
 pub(super) fn default_rules() -> Vec<InjectionRule> {

@@ -1,7 +1,7 @@
 use ahash::AHashMap;
 use ascii_table::AsciiTable;
 use parking_lot::RwLock;
-use petgraph::{algo::k_shortest_path, graph::NodeIndex, visit::Topo, Graph};
+use petgraph::{algo::k_shortest_path, data::FromElements, graph::{NodeIndex, UnGraph}, visit::{EdgeRef, Topo}, Graph};
 use std::{
     hash::{Hash, Hasher},
     marker::PhantomData,
@@ -9,12 +9,7 @@ use std::{
 };
 
 use crate::{
-    dispatcher::Dispatcher,
-    inject::InjectionOrder,
-    rules::{default_rules, post_user, user, InjectionRule},
-    stage::StageId,
-    world::World,
-    ResourceMask,
+    dispatcher::Dispatcher, inject::InjectionOrder, rules::{default_rules, post_user, user, InjectionRule}, stage::StageId, world::World, RegistrySortingError, ResourceMask, StageError
 };
 
 pub(crate) struct Internal {
@@ -28,15 +23,25 @@ pub(crate) struct Internal {
 pub struct UnfinishedRegistry<E> {
     _phantom: PhantomData<E>,
     systems: AHashMap<StageId, Internal>,
+    thread_count: Option<usize>,
 }
 
 impl<E> UnfinishedRegistry<E> {
     pub fn insert<S: FnMut(&World) + Sync + Send + 'static>(
         &mut self,
         system: S,
-    ) -> InjectionOrder<E> {
+    ) -> Result<InjectionOrder<E>, StageError> {
         let rules = default_rules();
         let stage = StageId::fetch(&system);
+        
+        if self.systems.contains_key(&stage) {
+            return Err(StageError::Overlapping);
+        }
+
+        if [StageId::fetch(&user), StageId::fetch(&post_user)].contains(&stage) {
+            return Err(StageError::InvalidName);
+        }
+
         self.systems.insert(
             stage,
             Internal {
@@ -47,14 +52,19 @@ impl<E> UnfinishedRegistry<E> {
             },
         );
         let internal = self.systems.get_mut(&stage).unwrap();
-        InjectionOrder::new(internal)
+        Ok(InjectionOrder::new(internal))
+    }
+
+    pub fn set_thread_count(&mut self, thread_count: Option<usize>) {
+        self.thread_count = thread_count;
     }
 
     // two (three) constraints
     // 1) make sure ordering constraint is held (sys a before sys b)
     // 2) make sure no intersecting RW masks
     // 3) (optional) optimize RW masks to improve concurrency
-    pub fn sort(mut self, world: Arc<RwLock<World>>) -> Dispatcher {
+    pub fn sort(mut self, world: Arc<World>) -> Result<Dispatcher, RegistrySortingError> {
+        let thread_count = self.thread_count.unwrap_or_else(num_cpus::get).max(1);
         let mut graph = Graph::<StageId, &InjectionRule>::new();
 
         let mut temp_vec = self.systems.iter().collect::<Vec<_>>();
@@ -76,7 +86,7 @@ impl<E> UnfinishedRegistry<E> {
             for rule in internal.rules.iter() {
                 let this = nodes[node];
                 let reference = rule.reference();
-                let reference = *nodes.get(&reference).unwrap();
+                let reference = *nodes.get(&reference).ok_or(RegistrySortingError::MissingStage(**node, reference))?;
 
                 match rule {
                     // dir: a -> b.
@@ -97,7 +107,32 @@ impl<E> UnfinishedRegistry<E> {
 
         // Get the "depths" of each node assuming constant edge weights
         // This allows us to get adjacent sibling systems that we can merge if we have correct resource masks
-        let path = k_shortest_path(&graph, user, None, 1, |x| 1);
+        dbg!(graph.node_count());
+        let copy = graph.clone();
+        let mut undirected_graph = UnGraph::<StageId, &InjectionRule>::new_undirected();
+
+        for node in graph.node_indices() {
+            undirected_graph.add_node(graph[node]);
+        }
+
+        for edge in graph.edge_references() {
+            let source = edge.source();
+            let target = edge.target();
+            let weight = edge.weight();
+    
+            undirected_graph.add_edge(source, target, weight);
+            undirected_graph.add_edge(target, source, weight);
+        }
+
+        let graph = undirected_graph;
+        let path = k_shortest_path(&graph, user, None, 1, |_| 1);
+
+        for (node, index) in &path {
+            log::debug!("System: {}, Index: {}", graph.node_weight(*node).unwrap().name, index);
+        }
+
+        let graph = copy;
+
         let mut path_sorted = path
             .iter()
             .map(|(idx, temp)| {
@@ -192,10 +227,9 @@ impl<E> UnfinishedRegistry<E> {
         }
 
         // Topoligcally sort the graph (stage ordering)
+        // We do this AFTER we try to merge all similar systems since trying to run them in parallel isn't as important as getting the ordering right
         let mut topo = Topo::new(&graph);
-
         let mut data = Vec::<Vec<String>>::default();
-        let thread_count = num_cpus::get();
         for i in 0..thread_count {
             let a = format!("Thread: {}", i + 1);
             data.push(vec![a]);
@@ -206,6 +240,7 @@ impl<E> UnfinishedRegistry<E> {
 
         // column based table to know what to execute in parallel
         let mut execution_matrix_cm = Vec::<Vec<StageId>>::default();
+        let mut count = 0;
         while let Some(node) = topo.next(&graph) {
             if node == user || node == post_user {
                 continue;
@@ -231,6 +266,28 @@ impl<E> UnfinishedRegistry<E> {
                 group,
                 path[&node]
             );
+
+            count += 1;
+        }
+        
+        // Handle thread task overflow here (basically leak extra tasks to a new group, repeat until done)
+        // I know this is really ugly. Will fix later
+        while execution_matrix_cm.iter().any(|x| x.len() > thread_count) {
+            let group_index_extra = execution_matrix_cm.iter().position(|x| x.len() > thread_count).unwrap();
+            log::debug!("Goup index: {group_index_extra}");
+            let extras = execution_matrix_cm[group_index_extra].drain(thread_count..).collect::<Vec<_>>();
+
+            if extras.len() == 0 {
+                panic!("fuckj");
+            }
+
+            log::debug!("Extra count: {}", extras.len());
+            execution_matrix_cm.insert(group_index_extra + 1, extras);
+        }
+        
+        // If there are missing nodes then we must have a cylic reference
+        if count < temp_vec.len() {
+            return Err(RegistrySortingError::GraphVisitMissingNodes);
         }
 
         let mut ascii_table = AsciiTable::default();
@@ -246,7 +303,7 @@ impl<E> UnfinishedRegistry<E> {
                 }
             }
         }
-        log::debug!("{}", ascii_table.format(data));
+        log::debug!("\n{}", ascii_table.format(data));
 
         // must convert the column major data to row major so each thread has to worry about its own data only
         let mut per_thread = Vec::<Vec<Option<Internal>>>::default();
@@ -259,9 +316,29 @@ impl<E> UnfinishedRegistry<E> {
                 let internal = parallel.get(i).map(|i| self.systems.remove(i).unwrap());
                 per_thread[i].push(internal);
             }
-        }
+
+            /*
+            // we should try splitting all the parallel tasks evenly across multiple threads
+            // could even implement a "priority" system where one thread takes most of the tasks or if the user wants a task to execute on a specific 
+            let mut thread_index = 0;
+            while !parallel.is_empty() {
+                thread_index %= thread_count; 
+                let removed = parallel.remove(0); 
+                
+                let internal = self.systems.remove(&removed);
+                per_thread[thread_index].push(internal);
+                thread_index += 1;
+            }
+            */
+        }        
 
         per_thread.retain(|x| x.iter().any(|x| x.is_some()));
-        Dispatcher::build(per_thread, world)
+        let max = per_thread.iter().map(|x| x.len()).max().unwrap();
+
+        for x in per_thread.iter_mut() {
+            x.resize_with(max, || None);
+        }
+
+        Ok(Dispatcher::build(per_thread, world))
     }
 }
