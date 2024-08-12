@@ -10,3 +10,8 @@ Now I know that this is mostly used for "tasks" but I'm going to call them "syst
 * Global world where you can access resources without lock contentation (since the scheduler prevents it).
 * Supports up to an arbitrary number of thread, but allows you to limit them (and force some systems that *could* run in parallel to run sequentially)
 * Injection rules that allow some systems to run before others
+
+
+### Note
+I know that the code is pretty bad in some places. I also know that this doesn't completely fix lock contentation and that I am probably overlooking a big factor in thread scheduling and stuff.
+This is just a toy project and it *probably* performs bad in real life stress tests. I originally intended this to be my game engine's scheduler but I haven't worked on my engine in like a year so this'll probably stay like a smol side project for now :3
