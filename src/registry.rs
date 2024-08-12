@@ -1,6 +1,7 @@
 use std::{any::TypeId, fmt::Display, hash::{Hash, Hasher}, marker::PhantomData, sync::{Arc, Barrier}, thread::ThreadId};
 use ahash::AHashMap;
 use ascii_table::AsciiTable;
+use parking_lot::RwLock;
 use petgraph::{algo::k_shortest_path, graph::NodeIndex, visit::{Bfs, DfsPostOrder, Topo}, Direction, Graph};
 
 use crate::{dispatcher::Dispatcher, inject::InjectionOrder, rules::{default_rules, post_user, user, InjectionRule}, stage::StageId, world::World, ResourceMask};
@@ -36,10 +37,9 @@ impl<E> UnfinishedRegistry<E> {
     // 1) make sure ordering constraint is held (sys a before sys b)
     // 2) make sure no intersecting RW masks
     // 3) (optional) optimize RW masks to improve concurrency
-    pub fn sort(mut self) -> Dispatcher {
+    pub fn sort(mut self, world: Arc<RwLock<World>>) -> Dispatcher {
         let mut graph = Graph::<StageId, &InjectionRule>::new();
-        let thread_count = num_cpus::get();
-
+        
         let mut temp_vec = self.systems.iter().collect::<Vec<_>>();
         temp_vec.sort_by_key(|x| x.0);
         let mut nodes = temp_vec.iter()
@@ -116,7 +116,7 @@ impl<E> UnfinishedRegistry<E> {
             
             let node_reads = internal.reads;
             let node_writes = internal.writes;
-            println!("System: {} Depth: {} R: {:#06b}, W: {:#06b}", graph[index].name, depth, node_reads, node_writes);
+            log::debug!("System: {} Depth: {} R: {:#06b}, W: {:#06b}", graph[index].name, depth, node_reads, node_writes);
 
             // must find group with the following requirements:
             // 1) same depth as current node depth
@@ -149,13 +149,14 @@ impl<E> UnfinishedRegistry<E> {
         }
 
         for (i, (depth, reads, writes, _)) in groups.iter().enumerate() {
-            println!("Index: {i}, Depth {depth}, R: {:#06b}, W: {:#06b}", *reads, *writes)
+            log::debug!("Index: {i}, Depth {depth}, R: {:#06b}, W: {:#06b}", *reads, *writes)
         }
 
         // Topoligcally sort the graph (stage ordering)
         let mut topo = Topo::new(&graph);
-        let mut data = Vec::<Vec<String>>::default();
         
+        let mut data = Vec::<Vec<String>>::default();
+        let thread_count = num_cpus::get();
         for i in 0..thread_count {
             let a = format!("Thread: {}", i+1);
             data.push(vec![a]);
@@ -166,8 +167,6 @@ impl<E> UnfinishedRegistry<E> {
 
         // column based table to know what to execute in parallel
         let mut execution_matrix_cm = Vec::<Vec::<StageId>>::default();
-        
-
         while let Some(node) = topo.next(&graph) {
             if node == user || node == post_user {
                 continue;
@@ -187,7 +186,7 @@ impl<E> UnfinishedRegistry<E> {
                 last_group = Some(i);
             }
 
-            println!("System: {}, group: {:?}, depth: {}", graph[node].name, group, path[&node]);
+            log::debug!("System: {}, group: {:?}, depth: {}", graph[node].name, group, path[&node]);
         }
 
         let mut ascii_table = AsciiTable::default();
@@ -203,25 +202,22 @@ impl<E> UnfinishedRegistry<E> {
                 }
             }
         }
-        ascii_table.print(data);
+        log::debug!("{}", ascii_table.format(data));
 
         // must convert the column major data to row major so each thread has to worry about its own data only
-        let mut per_thread = Vec::<Vec<Option<Box<dyn FnMut(&World) + Sync + Send>>>>::default();
-        for i in 0..thread_count {
+        let mut per_thread = Vec::<Vec<Option<Internal>>>::default();
+        for _ in 0..thread_count {
             per_thread.push(Vec::new());
         }
 
         for parallel in execution_matrix_cm {
             for i in 0..thread_count {
-                let system = parallel.get(i).map(|i| self.systems.remove(i).map(|x| x.boxed).unwrap());
-                per_thread[i].push(system);
+                let internal = parallel.get(i).map(|i| self.systems.remove(i).unwrap());
+                per_thread[i].push(internal);
             }
         }
 
         per_thread.retain(|x| x.iter().any(|x| x.is_some()));
-        Dispatcher {
-            per_thread,
-            handles: Default::default(),
-        }
+        Dispatcher::build(per_thread, world)
     }
 }
