@@ -1,9 +1,6 @@
-use std::{
-    cell::{Ref, RefMut},
-    ops::{Deref, DerefMut},
-};
+use std::ops::{Deref, DerefMut};
 
-use parking_lot::{MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{MappedRwLockReadGuard, MappedRwLockWriteGuard};
 
 use crate::Resource;
 

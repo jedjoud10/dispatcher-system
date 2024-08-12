@@ -1,12 +1,15 @@
-use std::any::{Any, TypeId};
 use ahash::AHashMap;
 use lazy_static::lazy_static;
 use parking_lot::{Mutex, RwLock};
+use std::any::{Any, TypeId};
 
 pub type ResourceMask = u64;
 
 pub trait Resource: Any + 'static + Sync + Send {
-    fn mask() -> ResourceMask where Self: Sized {
+    fn mask() -> ResourceMask
+    where
+        Self: Sized,
+    {
         // Check if we need to register
         let id = TypeId::of::<Self>();
         if REGISTERED.read().contains_key(&id) {
@@ -21,10 +24,10 @@ pub trait Resource: Any + 'static + Sync + Send {
             // Le bitshifting
             let copy = *bit;
             locked.insert(TypeId::of::<Self>(), copy);
-            *bit = u64::from(copy).checked_shl(1).unwrap();
+            *bit = copy.checked_shl(1).unwrap();
             copy
         }
-    } 
+    }
     fn as_any_ref(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }

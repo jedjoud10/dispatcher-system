@@ -1,7 +1,13 @@
-use std::{sync::{atomic::{AtomicBool, Ordering}, Arc, Barrier}, thread::JoinHandle};
-use parking_lot::{Condvar, Mutex, RwLock};
+use parking_lot::RwLock;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Barrier,
+    },
+    thread::JoinHandle,
+};
 
-use crate::{Internal, InternalData, ResourceMask, World};
+use crate::{Internal, InternalData, World};
 
 pub struct Dispatcher {
     pub(crate) handles: Vec<JoinHandle<()>>,
@@ -23,42 +29,50 @@ impl Dispatcher {
             let var = var.clone();
             let world = world.clone();
             let builder = std::thread::Builder::new().name(format!("thread-{i}"));
-            let handle = builder.spawn(move || {
-                loop {
-                    if var.load(Ordering::Relaxed) {
-                        //break;
-                    }
-
-                    global_barrier.wait();
-
-                    for group in data.iter_mut() {
-                        group_barrier.wait();
-                        if let Some(Internal { boxed, reads, writes, .. }) = group {
-                            let world = world.read();
-                            let data = InternalData {
-                                read: *reads,
-                                write: *writes,
-                            };
-
-                            world.set_internal(data);
-                            boxed(&world);
+            let handle = builder
+                .spawn(move || {
+                    loop {
+                        if var.load(Ordering::Relaxed) {
+                            //break;
                         }
-                        group_barrier.wait();
-                    }
 
-                    global_barrier.wait();
-                }
-            }).unwrap();
+                        global_barrier.wait();
+
+                        for group in data.iter_mut() {
+                            group_barrier.wait();
+                            if let Some(Internal {
+                                boxed,
+                                reads,
+                                writes,
+                                ..
+                            }) = group
+                            {
+                                let world = world.read();
+                                let data = InternalData {
+                                    read: *reads,
+                                    write: *writes,
+                                };
+
+                                world.set_internal(data);
+                                boxed(&world);
+                            }
+                            group_barrier.wait();
+                        }
+
+                        global_barrier.wait();
+                    }
+                })
+                .unwrap();
             handles.push(handle);
         }
 
         Self {
             handles: Vec::default(),
             global_barrier,
-            quit: var
+            quit: var,
         }
     }
-    
+
     pub fn dispatch(&mut self) {
         self.global_barrier.wait();
         self.global_barrier.wait();
@@ -67,7 +81,6 @@ impl Dispatcher {
 
 impl Drop for Dispatcher {
     fn drop(&mut self) {
-        
         self.quit.store(true, Ordering::Relaxed);
         for thread in self.handles.drain(..) {
             println!("Bruh");

@@ -1,6 +1,6 @@
-use std::{any::Any, sync::Arc};
 use dispatcher_system::*;
 use parking_lot::RwLock;
+use std::sync::Arc;
 
 struct ResourrceA;
 

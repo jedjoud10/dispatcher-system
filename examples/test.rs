@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use dispatcher_system::*;
 use parking_lot::RwLock;
+use std::sync::Arc;
 
 // must execute after B
 fn system_a(w: &World) {
@@ -19,15 +19,14 @@ struct ResourceC();
 
 fn main() {
     let mut registry = UnfinishedRegistry::<()>::default();
-    registry.insert(system_a)
-        .after(system_c);
+    registry.insert(system_a).after(system_c);
 
-    registry.insert(system_b)
+    registry
+        .insert(system_b)
         .reads(ResourceA::mask())
         .reads(ResourceB::mask());
 
-    registry.insert(system_c)
-        .reads(ResourceC::mask());
+    registry.insert(system_c).reads(ResourceC::mask());
 
     let world = Arc::new(RwLock::new(World::default()));
     let mut dispatcher = registry.sort(world.clone());

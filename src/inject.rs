@@ -1,5 +1,7 @@
-use std::{marker::PhantomData, any::TypeId};
-use crate::{resources::ResourceMask, rules::InjectionRule, stage::StageId, world::World, Internal};
+use crate::{
+    resources::ResourceMask, rules::InjectionRule, stage::StageId, world::World, Internal,
+};
+use std::marker::PhantomData;
 
 pub struct InjectionOrder<'a, E> {
     pub(crate) internal: &'a mut Internal,
@@ -35,13 +37,17 @@ impl<'a, E> InjectionOrder<'a, E> {
 
     pub fn before<S: FnMut(&World) + 'static>(mut self, system: S) -> Self {
         self.reset_defaults();
-        self.internal.rules.push(InjectionRule::Before(StageId::fetch(&system)));
+        self.internal
+            .rules
+            .push(InjectionRule::Before(StageId::fetch(&system)));
         self
     }
 
     pub fn after<S: FnMut(&World) + 'static>(mut self, system: S) -> Self {
         self.reset_defaults();
-        self.internal.rules.push(InjectionRule::After(StageId::fetch(&system)));
+        self.internal
+            .rules
+            .push(InjectionRule::After(StageId::fetch(&system)));
         self
     }
 }
