@@ -1,5 +1,4 @@
 use dispatcher_system::*;
-use parking_lot::RwLock;
 use std::sync::Arc;
 
 // must execute after C

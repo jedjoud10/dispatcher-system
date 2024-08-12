@@ -1,7 +1,6 @@
 use ahash::AHashMap;
 use ascii_table::AsciiTable;
-use parking_lot::RwLock;
-use petgraph::{algo::k_shortest_path, data::FromElements, graph::{NodeIndex, UnGraph}, visit::{EdgeRef, Topo}, Graph};
+use petgraph::{algo::k_shortest_path, graph::{NodeIndex, UnGraph}, visit::{EdgeRef, Topo}, Graph};
 use std::{
     hash::{Hash, Hasher},
     marker::PhantomData,
@@ -277,7 +276,7 @@ impl<E> UnfinishedRegistry<E> {
             log::debug!("Goup index: {group_index_extra}");
             let extras = execution_matrix_cm[group_index_extra].drain(thread_count..).collect::<Vec<_>>();
 
-            if extras.len() == 0 {
+            if extras.is_empty() {
                 panic!("fuckj");
             }
 
