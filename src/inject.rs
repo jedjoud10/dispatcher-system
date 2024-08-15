@@ -3,18 +3,16 @@ use crate::{
 };
 use std::marker::PhantomData;
 
-pub struct InjectionOrder<'a, E> {
+pub struct InjectionOrder<'a> {
     pub(crate) internal: &'a mut Internal,
     pub(crate) default: bool,
-    pub(crate) _phantom: PhantomData<E>,
 }
 
-impl<'a, E> InjectionOrder<'a, E> {
+impl<'a> InjectionOrder<'a> {
     pub(crate) fn new(internal: &'a mut Internal) -> Self {
         Self {
             internal,
             default: true,
-            _phantom: PhantomData,
         }
     }
 
@@ -47,7 +45,7 @@ impl<'a, E> InjectionOrder<'a, E> {
         self.reset_defaults();
         self.internal
             .rules
-            .push(InjectionRule::Before(StageId::fetch(&system)));
+            .push(InjectionRule::Before(StageId::of(&system)));
         self
     }
 
@@ -55,7 +53,7 @@ impl<'a, E> InjectionOrder<'a, E> {
         self.reset_defaults();
         self.internal
             .rules
-            .push(InjectionRule::After(StageId::fetch(&system)));
+            .push(InjectionRule::After(StageId::of(&system)));
         self
     }
 }

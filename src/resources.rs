@@ -1,7 +1,6 @@
 use ahash::AHashMap;
-use lazy_static::lazy_static;
-use parking_lot::{Mutex, RwLock};
-use std::any::{Any, TypeId};
+use parking_lot::Mutex;
+use std::{any::{Any, TypeId}, sync::LazyLock};
 
 pub type ResourceMask = u64;
 
@@ -12,13 +11,13 @@ pub trait Resource: Any + 'static + Sync + Send {
     {
         // Check if we need to register
         let id = TypeId::of::<Self>();
-        if REGISTERED.read().contains_key(&id) {
+        if REGISTERED.lock().contains_key(&id) {
             // Read normally
-            let locked = REGISTERED.read();
+            let locked = REGISTERED.lock();
             *locked.get(&id).unwrap()
         } else {
             // Register the component
-            let mut locked = REGISTERED.write();
+            let mut locked = REGISTERED.lock();
             let mut bit = NEXT.lock();
 
             // Le bitshifting
@@ -41,8 +40,5 @@ impl<T: Any + Sync + Send + 'static> Resource for T {
     }
 }
 
-// Registered components
-lazy_static! {
-    static ref NEXT: Mutex<u64> = Mutex::new(1);
-    static ref REGISTERED: RwLock<AHashMap<TypeId, u64>> = RwLock::new(AHashMap::new());
-}
+static NEXT: LazyLock<Mutex<u64>> = LazyLock::new(|| Mutex::new(1));
+static REGISTERED: LazyLock<Mutex<AHashMap<TypeId, u64>>> = LazyLock::new(|| Mutex::new(AHashMap::default()));

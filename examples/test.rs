@@ -1,13 +1,7 @@
 use dispatcher_system::*;
 use std::sync::Arc;
 
-// Simple test resource
-struct ResourrceA(u32);
-
-// This will read from the resource and print its internal value
-fn system_a(w: &World) {
-    let res = w.get::<ResourrceA>().unwrap();
-    dbg!(res.0);
+fn system_a(_: &World) {
 }
 
 fn main() {
@@ -15,12 +9,11 @@ fn main() {
 
     // Create a registry and add the system (making sure to set the "reads" bitmask)
     let mut registry = UnfinishedRegistry::default();
-    registry.insert(system_a).unwrap().reads::<ResourrceA>();
+    registry.insert(system_a).unwrap();
 
     // Create a test world and add the resource
-    let mut world = World::default();
-    world.insert(ResourrceA(0));
-
+    let world = World::default();
+    
     // Create a dispatcher by sorting the registry and execute it
     let mut dispatcher = registry.sort().unwrap().build(Arc::new(world));
     dispatcher.dispatch();

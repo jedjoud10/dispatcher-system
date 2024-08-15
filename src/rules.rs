@@ -26,7 +26,7 @@ pub fn post_user(_: &World) {}
 
 // Create the default rules for a default node
 pub(super) fn default_rules() -> Vec<InjectionRule> {
-    let after = InjectionRule::After(StageId::fetch(&user));
-    let before = InjectionRule::Before(StageId::fetch(&post_user));
+    let after = InjectionRule::After(StageId::of(&user));
+    let before = InjectionRule::Before(StageId::of(&post_user));
     vec![before, after]
 }

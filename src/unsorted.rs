@@ -1,49 +1,50 @@
 use ahash::AHashMap;
 use ascii_table::AsciiTable;
-use petgraph::{algo::k_shortest_path, graph::{NodeIndex, UnGraph}, visit::{EdgeRef, Topo}, Graph};
+use petgraph::{algo::k_shortest_path, graph::{NodeIndex, UnGraph}, visit::{EdgeRef, NodeRef, Topo}, Graph};
 use std::{
-    hash::{Hash, Hasher},
-    marker::PhantomData,
-    sync::Arc,
+    collections::HashMap, hash::{Hash, Hasher}, marker::PhantomData, sync::Arc
 };
 
 use crate::{
-    dispatcher::Dispatcher, inject::InjectionOrder, rules::{default_rules, post_user, user, InjectionRule}, stage::StageId, world::World, RegistrySortingError, ResourceMask, StageError
+    dispatcher::Dispatcher, inject::InjectionOrder, rules::{default_rules, post_user, user, InjectionRule}, stage::StageId, world::World, RegistrySortingError, ResourceMask, SortedRegistry, StageError
 };
 
 pub(crate) struct Internal {
     pub(crate) boxed: Box<dyn FnMut(&World) + Sync + Send>,
+    pub(crate) stage: StageId,
     pub(crate) rules: Vec<InjectionRule>,
     pub(crate) reads: ResourceMask,
     pub(crate) writes: ResourceMask,
 }
 
+
 #[derive(Default)]
-pub struct UnfinishedRegistry<E> {
-    _phantom: PhantomData<E>,
+pub struct UnfinishedRegistry {
     systems: AHashMap<StageId, Internal>,
     thread_count: Option<usize>,
 }
 
-impl<E> UnfinishedRegistry<E> {
+impl UnfinishedRegistry {
+    // Add a new system to the registry so we can execute it
     pub fn insert<S: FnMut(&World) + Sync + Send + 'static>(
         &mut self,
         system: S,
-    ) -> Result<InjectionOrder<E>, StageError> {
+    ) -> Result<InjectionOrder, StageError> {
         let rules = default_rules();
-        let stage = StageId::fetch(&system);
+        let stage = StageId::of(&system);
         
         if self.systems.contains_key(&stage) {
             return Err(StageError::Overlapping);
         }
 
-        if [StageId::fetch(&user), StageId::fetch(&post_user)].contains(&stage) {
+        if [StageId::of(&user), StageId::of(&post_user)].contains(&stage) {
             return Err(StageError::InvalidName);
         }
 
         self.systems.insert(
             stage,
             Internal {
+                stage,
                 boxed: Box::new(system),
                 rules,
                 reads: ResourceMask::default(),
@@ -54,6 +55,8 @@ impl<E> UnfinishedRegistry<E> {
         Ok(InjectionOrder::new(internal))
     }
 
+    // Set the number of threads that the registry can use during dispatch calls
+    // Set to None to use the current number of logical threads - 1
     pub fn set_thread_count(&mut self, thread_count: Option<usize>) {
         self.thread_count = thread_count;
     }
@@ -62,9 +65,9 @@ impl<E> UnfinishedRegistry<E> {
     // 1) make sure ordering constraint is held (sys a before sys b)
     // 2) make sure no intersecting RW masks
     // 3) (optional) optimize RW masks to improve concurrency
-    pub fn sort(mut self, world: Arc<World>) -> Result<Dispatcher, RegistrySortingError> {
-        let thread_count = self.thread_count.unwrap_or_else(num_cpus::get).max(1);
-        let mut graph = Graph::<StageId, &InjectionRule>::new();
+    pub fn sort(self) -> Result<SortedRegistry, RegistrySortingError> {
+        let thread_count = self.thread_count.unwrap_or_else(|| num_cpus::get() - 1).max(1);
+        let mut graph = Graph::<StageId, ()>::new();
 
         let mut temp_vec = self.systems.iter().collect::<Vec<_>>();
         temp_vec.sort_by_key(|x| x.0);
@@ -73,13 +76,14 @@ impl<E> UnfinishedRegistry<E> {
             .map(|node| (*node.0, graph.add_node(*node.0)))
             .collect::<AHashMap<_, _>>();
 
-        let sid = StageId::fetch(&user);
+        let sid = StageId::of(&user);
         let user = graph.add_node(sid);
         nodes.insert(sid, user);
 
-        let sid = StageId::fetch(&post_user);
+        let sid = StageId::of(&post_user);
         let post_user = graph.add_node(sid);
         nodes.insert(sid, post_user);
+        graph.add_edge(user, post_user, ());
 
         for (node, internal) in temp_vec.iter() {
             for rule in internal.rules.iter() {
@@ -90,11 +94,11 @@ impl<E> UnfinishedRegistry<E> {
                 match rule {
                     // dir: a -> b.
                     // dir: this -> reference
-                    InjectionRule::Before(_) => graph.add_edge(this, reference, rule),
+                    InjectionRule::Before(_) => graph.add_edge(this, reference, ()),
 
                     // dir: a -> b.
                     // dir: reference -> this
-                    InjectionRule::After(_) => graph.add_edge(reference, this, rule),
+                    InjectionRule::After(_) => graph.add_edge(reference, this, ()),
                 };
             }
         }
@@ -106,38 +110,74 @@ impl<E> UnfinishedRegistry<E> {
 
         // Get the "depths" of each node assuming constant edge weights
         // This allows us to get adjacent sibling systems that we can merge if we have correct resource masks
-        dbg!(graph.node_count());
-        let copy = graph.clone();
-        let mut undirected_graph = UnGraph::<StageId, &InjectionRule>::new_undirected();
-
-        for node in graph.node_indices() {
-            undirected_graph.add_node(graph[node]);
-        }
-
-        for edge in graph.edge_references() {
-            let source = edge.source();
-            let target = edge.target();
-            let weight = edge.weight();
-    
-            undirected_graph.add_edge(source, target, weight);
-            undirected_graph.add_edge(target, source, weight);
-        }
-
-        let graph = undirected_graph;
-        let path = k_shortest_path(&graph, user, None, 1, |_| 1);
+        /*
+        let path: HashMap<NodeIndex, i32> = calculate_depths(&graph, user);
 
         for (node, index) in &path {
             log::debug!("System: {}, Index: {}", graph.node_weight(*node).unwrap().name, index);
         }
+        */
 
-        let graph = copy;
+        #[derive(Debug, Clone)]
+        enum Testino {
+            Concrete(i32),
+            Ref(NodeIndex),
+        }
 
+        let mut path_sorted = Vec::<(NodeIndex, i32)>::default();
+        let mut test = AHashMap::<NodeIndex, Testino>::default();
+        let mut bruh = Topo::new(&graph);
+        while let Some(a) = bruh.next(&graph) {
+            if test.is_empty() {
+                test.insert(a, Testino::Concrete(0));
+            }
+
+            log::debug!("{:?}, Depth: {:?}", graph.node_weight(a).unwrap(), test.get(&a));
+            if test.get(&a).is_some() {
+                for x in graph.edges_directed(a, petgraph::Direction::Outgoing) {
+                    let rizz = test.get(&a).map(|x| match x {
+                        Testino::Concrete(u) => Testino::Concrete(u + 1),
+                        Testino::Ref(u) => Testino::Ref(*u),
+                    }).unwrap_or_else(|| Testino::Ref(a));
+    
+                    test.insert(x.target(), rizz);
+                }
+            }
+            
+
+            path_sorted.push((a, 0));
+        }
+
+        // oh god it is horrible please make it stop
+        for (key, val) in test.iter() {
+            let (_, depth_to_write) = path_sorted.iter_mut().find(|x| x.0 == *key).unwrap();
+            
+            let mut next = val.clone();
+            let mut count = 0;
+            while let Testino::Ref(idx) = next {
+                next = test[&idx].clone();
+                count += 1;
+            }
+            
+            if let Testino::Concrete(k) = next {
+                *depth_to_write = k + count;
+            } else {
+                panic!();
+            }
+        }
+
+        /*
+        for (key, val) in test {
+            path_sorted[key]
+        }
+        */
+
+        /*
         let mut path_sorted = path
             .iter()
             .map(|(idx, temp)| {
                 (
                     idx,
-                    temp,
                     self.systems
                         .get(&graph[*idx])
                         .map(|a| a.reads.count_ones() + a.writes.count_ones())
@@ -145,13 +185,15 @@ impl<E> UnfinishedRegistry<E> {
                 )
             })
             .collect::<Vec<_>>();
+        */
 
         // TODO: Sort the graph to minimize system fragmentation so that we can merge as many systems as possible together
         // Must apply some "weight" to the nodes so that nodes WITHOUT dependants are executed first (if dependency tree allows)
         // This way we can execute all similar systems first, then we can start subdividing down
 
         // FIX: Easiest fix would be to sort the systems based on rule set (so systems with similar rules are together)
-        // unfortunately this system shits itself when the user defines more rules than necessary (as that would change their hash and ordering n shit)
+        // unfortunately this system shits itself when the user defines more rules than necessary (as that would change their key)
+        /*
         path_sorted.sort_by_key(|(x, _, _)| {
             if **x == user || **x == post_user {
                 return 0;
@@ -163,10 +205,11 @@ impl<E> UnfinishedRegistry<E> {
             internal.rules.hash(&mut hash);
             hash.finish()
         });
+        */
 
         // this will batch the system into their "group" batches where they can execute in parallel with other systems
         // without overlapping their resource bitmasks
-        for (&index, &depth, _) in path_sorted.iter() {
+        for &(index, depth) in path_sorted.iter() {
             let (stage_id, _) = nodes.iter().find(|x| *x.1 == index).unwrap();
 
             let Some(internal) = self.systems.get(stage_id) else {
@@ -176,7 +219,7 @@ impl<E> UnfinishedRegistry<E> {
             let node_reads = internal.reads;
             let node_writes = internal.writes;
             log::debug!(
-                "System: {} Depth: {} R: {:#06b}, W: {:#06b}",
+                "System: {}, Depth: {} R: {:#06b}, W: {:#06b}",
                 graph[index].name,
                 depth,
                 node_reads,
@@ -194,8 +237,9 @@ impl<E> UnfinishedRegistry<E> {
                 groups
                     .iter()
                     .position(|(group_depth, group_reads, group_writes, _)| {
-                        let deptho = *group_depth == depth;
-
+                        // check group depth
+                        let depth = *group_depth == depth;
+                        
                         // check for ref-mut collisions
                         let ref_mut_collisions = (node_reads | node_writes) & group_writes == 0
                             && ((node_writes) & group_reads == 0);
@@ -203,7 +247,7 @@ impl<E> UnfinishedRegistry<E> {
                         // check for mut-mut collisions
                         let mut_mut_collisions = (node_writes & group_writes) == 0;
 
-                        deptho && ref_mut_collisions && mut_mut_collisions
+                        depth && ref_mut_collisions && mut_mut_collisions
                     });
 
             // if the group is missing, add it, otherwise just modify the current group
@@ -227,19 +271,28 @@ impl<E> UnfinishedRegistry<E> {
 
         // Topoligcally sort the graph (stage ordering)
         // We do this AFTER we try to merge all similar systems since trying to run them in parallel isn't as important as getting the ordering right
-        let mut topo = Topo::new(&graph);
         let mut data = Vec::<Vec<String>>::default();
         for i in 0..thread_count {
             let a = format!("Thread: {}", i + 1);
             data.push(vec![a]);
         }
 
-        let mut last_group = None;
-        let mut exec_counter = 0;
-
         // column based table to know what to execute in parallel
         let mut execution_matrix_cm = Vec::<Vec<StageId>>::default();
         let mut count = 0;
+
+        groups.sort_by_key(|(depth, _, _, _)| *depth);
+
+        for (_, _, _, x) in groups.iter() {
+            let g = x.iter().map(|a| *graph.node_weight(*a).unwrap()).collect::<Vec<_>>();
+            count += g.len();
+            execution_matrix_cm.push(g);
+        }
+        
+        /*
+        let mut last_group = None;
+        let mut exec_counter = 0;
+        
         while let Some(node) = topo.next(&graph) {
             if node == user || node == post_user {
                 continue;
@@ -260,13 +313,18 @@ impl<E> UnfinishedRegistry<E> {
             }
 
             log::debug!(
-                "System: {}, group: {:?}, depth: {}",
+                "System: {}, group: {:?}",
                 graph[node].name,
                 group,
-                path[&node]
             );
 
             count += 1;
+        }
+        */
+
+        // If there are missing nodes then we must have a cylic reference
+        if count < temp_vec.len() {
+            return Err(RegistrySortingError::GraphVisitMissingNodes);
         }
         
         // Handle thread task overflow here (basically leak extra tasks to a new group, repeat until done)
@@ -277,16 +335,11 @@ impl<E> UnfinishedRegistry<E> {
             let extras = execution_matrix_cm[group_index_extra].drain(thread_count..).collect::<Vec<_>>();
 
             if extras.is_empty() {
-                panic!("fuckj");
+                panic!();
             }
 
             log::debug!("Extra count: {}", extras.len());
             execution_matrix_cm.insert(group_index_extra + 1, extras);
-        }
-        
-        // If there are missing nodes then we must have a cylic reference
-        if count < temp_vec.len() {
-            return Err(RegistrySortingError::GraphVisitMissingNodes);
         }
 
         let mut ascii_table = AsciiTable::default();
@@ -304,40 +357,53 @@ impl<E> UnfinishedRegistry<E> {
         }
         log::debug!("\n{}", ascii_table.format(data));
 
-        // must convert the column major data to row major so each thread has to worry about its own data only
-        let mut per_thread = Vec::<Vec<Option<Internal>>>::default();
-        for _ in 0..thread_count {
-            per_thread.push(Vec::new());
-        }
+        let per_thread = row_major(thread_count, &execution_matrix_cm, self.systems);
+        
+        Ok(SortedRegistry {
+            column_major: execution_matrix_cm,
+            per_thread
+        })
+    }       
+}
 
-        for parallel in execution_matrix_cm {
-            for i in 0..thread_count {
-                let internal = parallel.get(i).map(|i| self.systems.remove(i).unwrap());
-                per_thread[i].push(internal);
-            }
-
-            /*
-            // we should try splitting all the parallel tasks evenly across multiple threads
-            // could even implement a "priority" system where one thread takes most of the tasks or if the user wants a task to execute on a specific 
-            let mut thread_index = 0;
-            while !parallel.is_empty() {
-                thread_index %= thread_count; 
-                let removed = parallel.remove(0); 
-                
-                let internal = self.systems.remove(&removed);
-                per_thread[thread_index].push(internal);
-                thread_index += 1;
-            }
-            */
-        }        
-
-        per_thread.retain(|x| x.iter().any(|x| x.is_some()));
-        let max = per_thread.iter().map(|x| x.len()).max().unwrap();
-
-        for x in per_thread.iter_mut() {
-            x.resize_with(max, || None);
-        }
-
-        Ok(Dispatcher::build(per_thread, world))
+fn row_major(thread_count: usize, execution_matrix_cm: &Vec<Vec<StageId>>, mut systems: AHashMap<StageId, Internal>) -> Vec<Vec<Option<Internal>>> {
+    // must convert the column major data to row major so each thread has to worry about its own data only
+    let mut per_thread = Vec::<Vec<Option<Internal>>>::default();
+    for _ in 0..thread_count {
+        per_thread.push(Vec::new());
     }
+    
+    for parallel in execution_matrix_cm {
+        for i in 0..thread_count {
+            let internal = parallel.get(i).map(|i| systems.remove(i).unwrap());
+            per_thread[i].push(internal);
+        }
+    }
+    
+    per_thread.retain(|x| x.iter().any(|x| x.is_some()));
+    let max = per_thread.iter().map(|x| x.len()).max().unwrap();
+    for x in per_thread.iter_mut() {
+        x.resize_with(max, || None);
+    }
+    per_thread
+}
+
+// calculate the depths of the systems starting from the user system
+fn calculate_depths<'a>(graph: &Graph<StageId, ()>, user: NodeIndex) -> HashMap<NodeIndex, i32> {
+    let mut new = UnGraph::default();
+    for node in graph.node_indices() {
+        new.add_node(graph[node]);
+    }
+
+    for edge in graph.edge_references() {
+        let source = edge.source();
+        let target = edge.target();    
+        new.add_edge(source, target, ());
+        new.add_edge(target, source, ());
+    }
+
+    let first = Topo::new(&graph).next(&graph).unwrap();
+
+    return k_shortest_path(&new, first, None, 1, |edge| { 1
+    });
 }

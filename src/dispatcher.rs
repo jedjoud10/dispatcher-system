@@ -1,9 +1,8 @@
 use std::{
-    sync::{
+    marker::PhantomData, sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Barrier,
-    },
-    thread::JoinHandle,
+    }, thread::JoinHandle
 };
 
 use crate::{Internal, InternalData, World};
