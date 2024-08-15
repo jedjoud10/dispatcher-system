@@ -2,7 +2,8 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Barrier,
-    }, thread::JoinHandle
+    },
+    thread::JoinHandle,
 };
 
 use crate::{Internal, InternalData, World};
@@ -30,36 +31,34 @@ impl Dispatcher {
             let builder = std::thread::Builder::new().name(format!("thread-{i}"));
             let var = var.clone();
             let handle = builder
-                .spawn(move || {
-                    loop {
-                        global_barrier.wait();
+                .spawn(move || loop {
+                    global_barrier.wait();
 
-                        if var.load(Ordering::Relaxed) {
-                            break;
-                        }
-
-                        for group in data.iter_mut() {
-                            group_barrier.wait();
-                            if let Some(Internal {
-                                boxed,
-                                reads,
-                                writes,
-                                ..
-                            }) = group
-                            {
-                                let data = InternalData {
-                                    read: *reads,
-                                    write: *writes,
-                                };
-
-                                world.set_internal(Some(data));
-                                boxed(&world);
-                            }
-                            group_barrier.wait();
-                        }
-
-                        global_barrier.wait();
+                    if var.load(Ordering::Relaxed) {
+                        break;
                     }
+
+                    for group in data.iter_mut() {
+                        group_barrier.wait();
+                        if let Some(Internal {
+                            boxed,
+                            reads,
+                            writes,
+                            ..
+                        }) = group
+                        {
+                            let data = InternalData {
+                                read: *reads,
+                                write: *writes,
+                            };
+
+                            world.set_internal(Some(data));
+                            boxed(&world);
+                        }
+                        group_barrier.wait();
+                    }
+
+                    global_barrier.wait();
                 })
                 .unwrap();
             handles.push(handle);

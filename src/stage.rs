@@ -1,4 +1,7 @@
-use std::{any::{type_name, TypeId}, fmt::Debug};
+use std::{
+    any::{type_name, TypeId},
+    fmt::Debug,
+};
 
 use crate::world::World;
 

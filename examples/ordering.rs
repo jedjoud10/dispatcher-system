@@ -14,7 +14,9 @@ fn system_c(_: &World) {}
 fn system_d(_: &World) {}
 
 fn main() {
-    env_logger::Builder::from_default_env().filter_level(log::LevelFilter::Debug).init();
+    env_logger::Builder::from_default_env()
+        .filter_level(log::LevelFilter::Debug)
+        .init();
 
     // Create a registry and add the systems with their rules
     let mut registry = Registry::default();

@@ -1,8 +1,16 @@
 use ahash::AHashMap;
-use petgraph::{graph::NodeIndex, visit::{EdgeRef, Topo}, Graph};
+use petgraph::{
+    graph::NodeIndex,
+    visit::{EdgeRef, Topo},
+    Graph,
+};
 
 use crate::{
-    inject::InjectionOrder, rules::{default_rules, post_user, user, InjectionRule}, stage::StageId, world::World, RegistrySortingError, ResourceMask, DispatchBuilder, StageError
+    inject::InjectionOrder,
+    rules::{default_rules, post_user, user, InjectionRule},
+    stage::StageId,
+    world::World,
+    DispatchBuilder, RegistrySortingError, ResourceMask, StageError,
 };
 
 pub(crate) struct Internal {
@@ -11,7 +19,6 @@ pub(crate) struct Internal {
     pub(crate) reads: ResourceMask,
     pub(crate) writes: ResourceMask,
 }
-
 
 #[derive(Default)]
 pub struct Registry {
@@ -26,7 +33,7 @@ impl Registry {
     ) -> Result<InjectionOrder, StageError> {
         let rules = default_rules();
         let stage = StageId::of(&system);
-        
+
         if self.systems.contains_key(&stage) {
             return Err(StageError::Overlapping);
         }
@@ -53,7 +60,6 @@ impl Registry {
     // 2) make sure no intersecting RW masks
     // 3) (optional) optimize RW masks to improve concurrency
     pub fn sort(self) -> Result<DispatchBuilder, RegistrySortingError> {
-        
         let mut graph = Graph::<StageId, ()>::new();
 
         let mut temp_vec = self.systems.iter().collect::<Vec<_>>();
@@ -76,7 +82,9 @@ impl Registry {
             for rule in internal.rules.iter() {
                 let this = nodes[node];
                 let reference = rule.reference();
-                let reference = *nodes.get(&reference).ok_or(RegistrySortingError::MissingStage(**node, reference))?;
+                let reference = *nodes
+                    .get(&reference)
+                    .ok_or(RegistrySortingError::MissingStage(**node, reference))?;
 
                 match rule {
                     // dir: a -> b.
@@ -109,18 +117,24 @@ impl Registry {
                 test.insert(a, Testino::Concrete(0));
             }
 
-            log::debug!("{:?}, Depth: {:?}", graph.node_weight(a).unwrap(), test.get(&a));
+            log::debug!(
+                "{:?}, Depth: {:?}",
+                graph.node_weight(a).unwrap(),
+                test.get(&a)
+            );
             if test.get(&a).is_some() {
                 for x in graph.edges_directed(a, petgraph::Direction::Outgoing) {
-                    let rizz = test.get(&a).map(|x| match x {
-                        Testino::Concrete(u) => Testino::Concrete(u + 1),
-                        Testino::Ref(u) => Testino::Ref(*u),
-                    }).unwrap_or_else(|| Testino::Ref(a));
-    
+                    let rizz = test
+                        .get(&a)
+                        .map(|x| match x {
+                            Testino::Concrete(u) => Testino::Concrete(u + 1),
+                            Testino::Ref(u) => Testino::Ref(*u),
+                        })
+                        .unwrap_or_else(|| Testino::Ref(a));
+
                     test.insert(x.target(), rizz);
                 }
             }
-            
 
             path_sorted.push((a, 0));
         }
@@ -128,14 +142,14 @@ impl Registry {
         // oh god it is horrible please make it stop
         for (key, val) in test.iter() {
             let (_, depth_to_write) = path_sorted.iter_mut().find(|x| x.0 == *key).unwrap();
-            
+
             let mut next = val.clone();
             let mut count = 0;
             while let Testino::Ref(idx) = next {
                 next = test[&idx].clone();
                 count += 1;
             }
-            
+
             if let Testino::Concrete(k) = next {
                 *depth_to_write = k + count;
             } else {
@@ -174,7 +188,7 @@ impl Registry {
                     .position(|(group_depth, group_reads, group_writes, _)| {
                         // check group depth
                         let depth = *group_depth == depth;
-                        
+
                         // check for ref-mut collisions
                         let ref_mut_collisions = (node_reads | node_writes) & group_writes == 0
                             && ((node_writes) & group_reads == 0);
@@ -209,7 +223,10 @@ impl Registry {
         let mut count = 0;
         groups.sort_by_key(|(depth, _, _, _)| *depth);
         for (_, _, _, x) in groups.iter() {
-            let g = x.iter().map(|a| *graph.node_weight(*a).unwrap()).collect::<Vec<_>>();
+            let g = x
+                .iter()
+                .map(|a| *graph.node_weight(*a).unwrap())
+                .collect::<Vec<_>>();
             count += g.len();
             execution_matrix_cm.push(g);
         }
@@ -218,12 +235,12 @@ impl Registry {
         if count < temp_vec.len() {
             return Err(RegistrySortingError::GraphVisitMissingNodes);
         }
-        
+
         Ok(DispatchBuilder {
             execution_matrix_cm,
             systems: self.systems,
             per_thread: Default::default(),
             balanced_thread_count: 0,
         })
-    }       
+    }
 }

@@ -1,6 +1,9 @@
 use ahash::AHashMap;
 use parking_lot::Mutex;
-use std::{any::{Any, TypeId}, sync::LazyLock};
+use std::{
+    any::{Any, TypeId},
+    sync::LazyLock,
+};
 
 pub type ResourceMask = u64;
 
@@ -41,4 +44,5 @@ impl<T: Any + Sync + Send + 'static> Resource for T {
 }
 
 static NEXT: LazyLock<Mutex<u64>> = LazyLock::new(|| Mutex::new(1));
-static REGISTERED: LazyLock<Mutex<AHashMap<TypeId, u64>>> = LazyLock::new(|| Mutex::new(AHashMap::default()));
+static REGISTERED: LazyLock<Mutex<AHashMap<TypeId, u64>>> =
+    LazyLock::new(|| Mutex::new(AHashMap::default()));

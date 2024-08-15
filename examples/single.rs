@@ -11,7 +11,9 @@ fn system_a(w: &World) {
 }
 
 fn main() {
-    env_logger::Builder::from_default_env().filter_level(log::LevelFilter::Debug).init();
+    env_logger::Builder::from_default_env()
+        .filter_level(log::LevelFilter::Debug)
+        .init();
 
     // Create a registry and add the system (making sure to set the "reads" bitmask)
     let mut registry = Registry::default();

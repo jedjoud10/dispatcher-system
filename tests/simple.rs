@@ -9,10 +9,13 @@ fn system_a(world: &World) {
 
 #[test]
 fn main() {
-    env_logger::Builder::from_default_env().is_test(true).filter_level(log::LevelFilter::Debug).try_init();
+    env_logger::Builder::from_default_env()
+        .is_test(true)
+        .filter_level(log::LevelFilter::Debug)
+        .try_init();
 
     let mut registry = Registry::default();
-    
+
     registry.insert(system_a).unwrap().before(user);
 
     let builder = registry.sort().unwrap();
@@ -21,12 +24,15 @@ fn main() {
 
 #[test]
 fn outside() {
-    env_logger::Builder::from_default_env().is_test(true).filter_level(log::LevelFilter::Debug).try_init();
+    env_logger::Builder::from_default_env()
+        .is_test(true)
+        .filter_level(log::LevelFilter::Debug)
+        .try_init();
 
     let mut registry = Registry::default();
-    
+
     registry.insert(system_a).unwrap().writes::<i32>();
-    
+
     let mut world = World::default();
     world.insert(0i32);
     let world = Arc::new(world);

@@ -31,7 +31,8 @@ impl World {
     // Youssef was here writing a dumb comment about how this code is so unordered and not friendly to the eyes <3
     // Get an immutable reference (read guard) to a resource
     pub fn get<R: Resource>(&self) -> Result<Read<R>, WorldBorrowError> {
-        let mask = World::INTERNAL.with_borrow(|x| x.as_ref().map(|x| x.read).unwrap_or(ResourceMask::MAX));
+        let mask = World::INTERNAL
+            .with_borrow(|x| x.as_ref().map(|x| x.read).unwrap_or(ResourceMask::MAX));
 
         if (mask & R::mask()) == 0 {
             return Err(WorldBorrowError::InvalidAccess);
@@ -49,7 +50,9 @@ impl World {
 
     // Get a mutable reference (write guard) to a resource
     pub fn get_mut<R: Resource>(&self) -> Result<Write<R>, WorldBorrowMutError> {
-        let mask = World::INTERNAL.with_borrow(|x: &Option<InternalData>| x.as_ref().map(|x| x.write).unwrap_or(ResourceMask::MAX));
+        let mask = World::INTERNAL.with_borrow(|x: &Option<InternalData>| {
+            x.as_ref().map(|x| x.write).unwrap_or(ResourceMask::MAX)
+        });
         if (mask & R::mask()) == 0 {
             return Err(WorldBorrowMutError::InvalidAccess);
         }
