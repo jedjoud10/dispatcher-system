@@ -5,14 +5,14 @@ use ascii_table::AsciiTable;
 
 use crate::{Dispatcher, Internal, StageId, World};
 
-pub struct SortedRegistry {
+pub struct DispatchBuilder {
     pub(crate) execution_matrix_cm: Vec<Vec<StageId>>,
     pub(crate) systems: AHashMap<StageId, Internal>,
     pub(crate) per_thread: Vec<Vec<Option<Internal>>>,
     pub(crate) balanced_thread_count: usize
 }
 
-impl SortedRegistry {
+impl DispatchBuilder {
     pub fn balance(&mut self, thread_count: Option<usize>)  {
         let thread_count = thread_count.unwrap_or_else(|| num_cpus::get() - 1).max(1);
 
@@ -34,13 +34,13 @@ impl SortedRegistry {
 
         let per_thread = row_major(thread_count, &execution_matrix_cm, std::mem::take(&mut self.systems));
         self.per_thread = per_thread;
+        self.balanced_thread_count = thread_count;
     }
 
     pub fn build(mut self, world: Arc<World>, thread_count: Option<usize>) -> Dispatcher {
         if self.per_thread.is_empty() {
             self.balance(thread_count);
         }
-
         
         let mut data = Vec::<Vec<String>>::default();
         let thread_count = self.balanced_thread_count;

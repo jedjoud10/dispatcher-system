@@ -1,10 +1,8 @@
 use ahash::AHashMap;
-use ascii_table::AsciiTable;
-use petgraph::{algo::k_shortest_path, graph::{NodeIndex, UnGraph}, visit::{EdgeRef, Topo}, Graph};
-use std::collections::HashMap;
+use petgraph::{graph::NodeIndex, visit::{EdgeRef, Topo}, Graph};
 
 use crate::{
-    inject::InjectionOrder, rules::{default_rules, post_user, user, InjectionRule}, stage::StageId, world::World, RegistrySortingError, ResourceMask, SortedRegistry, StageError
+    inject::InjectionOrder, rules::{default_rules, post_user, user, InjectionRule}, stage::StageId, world::World, RegistrySortingError, ResourceMask, DispatchBuilder, StageError
 };
 
 pub(crate) struct Internal {
@@ -16,11 +14,11 @@ pub(crate) struct Internal {
 
 
 #[derive(Default)]
-pub struct UnfinishedRegistry {
+pub struct Registry {
     systems: AHashMap<StageId, Internal>,
 }
 
-impl UnfinishedRegistry {
+impl Registry {
     // Add a new system to the registry so we can execute it
     pub fn insert<S: FnMut(&World) + Sync + Send + 'static>(
         &mut self,
@@ -54,7 +52,7 @@ impl UnfinishedRegistry {
     // 1) make sure ordering constraint is held (sys a before sys b)
     // 2) make sure no intersecting RW masks
     // 3) (optional) optimize RW masks to improve concurrency
-    pub fn sort(self) -> Result<SortedRegistry, RegistrySortingError> {
+    pub fn sort(self) -> Result<DispatchBuilder, RegistrySortingError> {
         
         let mut graph = Graph::<StageId, ()>::new();
 
@@ -221,7 +219,7 @@ impl UnfinishedRegistry {
             return Err(RegistrySortingError::GraphVisitMissingNodes);
         }
         
-        Ok(SortedRegistry {
+        Ok(DispatchBuilder {
             execution_matrix_cm,
             systems: self.systems,
             per_thread: Default::default(),

@@ -19,7 +19,7 @@ fn main() {
     env_logger::Builder::from_default_env().filter_level(log::LevelFilter::Debug).init();
 
     // Create a registry and add the two systems (making sure to set the proper accesses)
-    let mut registry = UnfinishedRegistry::default();
+    let mut registry = Registry::default();
     registry.insert(system_a).unwrap().writes::<Option<ResourrceA>>();
     registry.insert(system_b).unwrap().after(system_a).reads::<Option<ResourrceA>>();
 

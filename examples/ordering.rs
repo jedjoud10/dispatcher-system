@@ -17,7 +17,7 @@ fn main() {
     env_logger::Builder::from_default_env().filter_level(log::LevelFilter::Debug).init();
 
     // Create a registry and add the systems with their rules
-    let mut registry = UnfinishedRegistry::default();
+    let mut registry = Registry::default();
     registry.insert(system_a).unwrap().after(system_c);
     registry.insert(system_b).unwrap().after(user);
     registry.insert(system_c).unwrap();

@@ -10,6 +10,7 @@ use crate::{Internal, InternalData, World};
 pub struct Dispatcher {
     pub(crate) handles: Vec<JoinHandle<()>>,
     pub(crate) global_barrier: Arc<Barrier>,
+    pub(crate) world: Arc<World>,
     pub(crate) var: Arc<AtomicBool>,
 }
 
@@ -51,7 +52,7 @@ impl Dispatcher {
                                     write: *writes,
                                 };
 
-                                world.set_internal(data);
+                                world.set_internal(Some(data));
                                 boxed(&world);
                             }
                             group_barrier.wait();
@@ -67,6 +68,7 @@ impl Dispatcher {
         Self {
             handles,
             global_barrier,
+            world,
             var,
         }
     }
@@ -74,6 +76,7 @@ impl Dispatcher {
     pub fn dispatch(&mut self) {
         self.global_barrier.wait();
         self.global_barrier.wait();
+        self.world.set_internal(None);
     }
 }
 

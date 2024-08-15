@@ -8,7 +8,7 @@ fn main() {
     env_logger::Builder::from_default_env().filter_level(log::LevelFilter::Debug).init();
 
     // Create a registry and add the system (making sure to set the "reads" bitmask)
-    let mut registry = UnfinishedRegistry::default();
+    let mut registry = Registry::default();
     registry.insert(system_a).unwrap();
 
     // Create a test world and add the resource
