@@ -28,6 +28,6 @@ fn main() {
     world.insert(Option::<ResourrceA>::None);
 
     // Create a dispatcher by sorting the registry and execute it
-    let mut dispatcher = registry.sort().unwrap().build(Arc::new(world));
+    let mut dispatcher = registry.sort().unwrap().build(Arc::new(world), None);
     dispatcher.dispatch();
 }

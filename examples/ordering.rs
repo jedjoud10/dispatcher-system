@@ -29,6 +29,6 @@ fn main() {
     let world = World::default();
 
     // Create a dispatcher by sorting the registry and execute it
-    let mut dispatcher = registry.sort().unwrap().build(Arc::new(world));
+    let mut dispatcher = registry.sort().unwrap().build(Arc::new(world), None);
     dispatcher.dispatch();
 }

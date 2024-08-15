@@ -1,7 +1,6 @@
 use crate::{
     resources::ResourceMask, rules::InjectionRule, stage::StageId, world::World, Internal, Resource,
 };
-use std::marker::PhantomData;
 
 pub struct InjectionOrder<'a> {
     pub(crate) internal: &'a mut Internal,

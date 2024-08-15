@@ -5,7 +5,7 @@ fn system_b(_: &World) {}
 
 #[test]
 fn main() {
-    env_logger::Builder::from_default_env().is_test(true).filter_level(log::LevelFilter::Debug).init();
+    env_logger::Builder::from_default_env().is_test(true).filter_level(log::LevelFilter::Debug).try_init();
 
     let mut registry = UnfinishedRegistry::default();
     

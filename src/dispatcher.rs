@@ -1,5 +1,5 @@
 use std::{
-    marker::PhantomData, sync::{
+    sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Barrier,
     }, thread::JoinHandle
