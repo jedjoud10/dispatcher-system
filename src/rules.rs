@@ -3,21 +3,12 @@ use crate::{stage::StageId, world::World};
 // A rule that depicts the arrangement and the location of the stages relative to other stages
 #[derive(Clone, Debug, Hash)]
 pub enum InjectionRule {
-    // This hints that the stage should be executed before other
     Before(StageId),
-
-    // This hints that the stage should be executed after other
     After(StageId),
-}
 
-impl InjectionRule {
-    // Get the node this rule is referencing
-    pub(super) fn reference(&self) -> StageId {
-        match self {
-            InjectionRule::Before(p) => *p,
-            InjectionRule::After(p) => *p,
-        }
-    }
+    // do note that in some cases where the threads are all saturated with tasks,
+    // the registry will sort fine even though the underlying tasks will NOT run in parallel
+    Parallel(StageId),
 }
 
 pub fn user(_: &World) {}

@@ -55,4 +55,11 @@ impl<'a> InjectionOrder<'a> {
             .push(InjectionRule::After(StageId::of(&system)));
         self
     }
+
+    pub fn parallel<S: FnMut(&World) + 'static>(self, system: S) -> Self {
+        self.internal
+            .rules
+            .push(InjectionRule::Parallel(StageId::of(&system)));
+        self
+    }
 }

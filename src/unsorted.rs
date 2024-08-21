@@ -78,22 +78,39 @@ impl Registry {
         nodes.insert(sid, post_user);
         graph.add_edge(user, post_user, ());
 
+        let mut should_execute_in_parallel = Vec::<Vec<StageId>>::new();
+
         for (node, internal) in temp_vec.iter() {
             for rule in internal.rules.iter() {
                 let this = nodes[node];
-                let reference = rule.reference();
-                let reference = *nodes
+                let reference = match rule {
+                    InjectionRule::Before(p) => *p,
+                    InjectionRule::After(p) => *p,
+                    InjectionRule::Parallel(p) => *p,
+                };
+                
+                let reference_node = *nodes
                     .get(&reference)
                     .ok_or(RegistrySortingError::MissingStage(**node, reference))?;
 
                 match rule {
                     // dir: a -> b.
                     // dir: this -> reference
-                    InjectionRule::Before(_) => graph.add_edge(this, reference, ()),
+                    InjectionRule::Before(_) => { graph.add_edge(this, reference_node, ()); },
 
                     // dir: a -> b.
                     // dir: reference -> this
-                    InjectionRule::After(_) => graph.add_edge(reference, this, ()),
+                    InjectionRule::After(_) => { graph.add_edge(reference_node, this, ()); },
+
+                    // find a rule group that we can add the stage id into
+                    InjectionRule::Parallel(_) => {
+                        let group = should_execute_in_parallel.iter_mut().find(|x| x.contains(&reference));
+                        if let Some(group) = group {
+                            group.push(**node);
+                        } else {
+                            should_execute_in_parallel.push(vec![**node, reference]);
+                        }
+                    },
                 };
             }
         }
@@ -229,6 +246,16 @@ impl Registry {
                 .collect::<Vec<_>>();
             count += g.len();
             execution_matrix_cm.push(g);
+        }
+
+        // Check for parallel rules to make sure we upheld them
+        let mut fine = true;
+        for a in should_execute_in_parallel {
+            fine &= execution_matrix_cm.iter().any(|y| a.iter().all(|j| y.contains(j)));
+        }
+
+        if !fine {
+            return Err(RegistrySortingError::UnsatisfiableParallelRules);
         }
 
         // If there are missing nodes then we must have a cylic reference

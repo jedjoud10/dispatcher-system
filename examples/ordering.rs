@@ -21,10 +21,10 @@ fn main() {
     // Create a registry and add the systems with their rules
     let mut registry = Registry::default();
     registry.insert(system_a).unwrap().after(system_c);
-    registry.insert(system_b).unwrap().after(user);
-    registry.insert(system_c).unwrap();
+    registry.insert(system_b).unwrap().after(user).writes::<i32>();
+    registry.insert(system_c).unwrap().writes::<u8>();
     registry.insert(system_d).unwrap().after(post_user);
-    registry.insert(|_| {}).unwrap().after(user);
+    registry.insert(|_| {}).unwrap().after(user).writes::<u8>();
     registry.insert(|_| {}).unwrap().before(user);
 
     // Create a test world and add the resource

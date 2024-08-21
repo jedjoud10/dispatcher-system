@@ -1,3 +1,5 @@
+#![allow(unused_must_use)]
+
 use dispatcher_system::*;
 
 struct ResA;
@@ -97,6 +99,22 @@ fn all() {
 
     let builder = registry.sort().unwrap();
     assert_eq!(builder.group(0).unwrap().len(), 5);
+}
+
+#[test]
+fn hint() {
+    env_logger::Builder::from_default_env()
+        .is_test(true)
+        .filter_level(log::LevelFilter::Debug)
+        .try_init();
+
+    let mut registry = Registry::default();
+
+    registry.insert(system_a).unwrap().parallel(system_b);
+    registry.insert(system_b).unwrap();
+    
+    let builder = registry.sort().unwrap();
+    assert_eq!(builder.group(0).unwrap().len(), 2);
 }
 
 #[test]

@@ -1,3 +1,4 @@
+#![allow(unused_must_use)]
 use dispatcher_system::*;
 use std::sync::Arc;
 

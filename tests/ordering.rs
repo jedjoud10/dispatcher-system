@@ -1,3 +1,4 @@
+#![allow(unused_must_use)]
 use dispatcher_system::*;
 
 fn system_a(_: &World) {}
@@ -29,7 +30,8 @@ fn main() {
         .insert(system_c)
         .unwrap()
         .before(post_user)
-        .after(user);
+        .after(user)
+        .parallel(system_c);
 
     registry
         .insert(system_b)

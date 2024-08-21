@@ -31,6 +31,9 @@ pub enum RegistrySortingError {
     #[error("Error while parsing Graph. Possibly due to cyclic reference / rules")]
     GraphVisitMissingNodes,
 
+    #[error("Error while parsing Graph. Possibly due to cyclic reference / rules")]
+    UnsatisfiableParallelRules,
+
     #[error("Stage '{0:?}' tried to reference stage '{1:?}', but the latter stage does not exist")]
     MissingStage(StageId, StageId),
 }
