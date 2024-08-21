@@ -11,7 +11,6 @@ use crate::{Internal, InternalData, World};
 pub struct Dispatcher {
     pub(crate) handles: Vec<JoinHandle<()>>,
     pub(crate) global_barrier: Arc<Barrier>,
-    pub(crate) world: Arc<World>,
     pub(crate) var: Arc<AtomicBool>,
 }
 
@@ -28,7 +27,9 @@ impl Dispatcher {
             let group_barrier = group_barrier.clone();
             let global_barrier = global_barrier.clone();
             let world = world.clone();
-            let builder = std::thread::Builder::new().name(format!("thread-{i}"));
+            let name = format!("thread-{i}");
+            log::debug!("Spawning dispatcher thread '{}'", &name);
+            let builder = std::thread::Builder::new().name(name);
             let var = var.clone();
             let handle = builder
                 .spawn(move || loop {
@@ -67,7 +68,6 @@ impl Dispatcher {
         Self {
             handles,
             global_barrier,
-            world,
             var,
         }
     }
@@ -75,7 +75,6 @@ impl Dispatcher {
     pub fn dispatch(&mut self) {
         self.global_barrier.wait();
         self.global_barrier.wait();
-        self.world.set_internal(None);
     }
 }
 

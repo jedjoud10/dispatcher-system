@@ -3,14 +3,22 @@ use ahash::AHashMap;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{any::TypeId, cell::RefCell};
 
+#[derive(Clone)]
 pub(crate) struct InternalData {
     pub read: ResourceMask,
     pub write: ResourceMask,
 }
 
-#[derive(Default)]
 pub struct World {
     pub(crate) resources: AHashMap<TypeId, RwLock<Box<dyn Resource>>>,
+}
+
+impl Default for World {
+    fn default() -> Self {
+        let world = Self { resources: Default::default() };
+        world.set_internal(None);
+        world
+    }
 }
 
 impl World {
@@ -71,6 +79,11 @@ impl World {
     pub fn contains<R: Resource>(&self) -> bool {
         self.resources.contains_key(&TypeId::of::<R>())
     }
+
+    // Get the current read and write resource masks for this thread (if any)
+    pub fn masks(&self) -> Option<(ResourceMask, ResourceMask)> {
+        World::INTERNAL.with_borrow(|x| x.clone()).map(|x| (x.read, x.write))
+    } 
 
     // Check if we are executing in a dispatcher thread or just on the main thread
     pub fn dispatched(&self) -> bool {

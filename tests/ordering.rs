@@ -51,3 +51,17 @@ fn main() {
     assert_eq!(builder.group(3), Some(&vec![StageId::of(&system_b)]));
     assert_eq!(builder.group(4), Some(&vec![StageId::of(&system_f)]));
 }
+
+#[test]
+fn err() {
+    env_logger::Builder::from_default_env()
+        .is_test(true)
+        .filter_level(log::LevelFilter::Debug)
+        .try_init();
+
+    let mut registry = Registry::default();
+
+    registry.insert(system_a).unwrap().after(system_b);
+    registry.insert(system_b).unwrap().after(system_a);
+    assert!(registry.sort().is_err());
+}

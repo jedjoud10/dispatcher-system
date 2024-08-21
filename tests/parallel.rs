@@ -118,6 +118,20 @@ fn hint() {
 }
 
 #[test]
+fn err() {
+    env_logger::Builder::from_default_env()
+        .is_test(true)
+        .filter_level(log::LevelFilter::Debug)
+        .try_init();
+
+    let mut registry = Registry::default();
+
+    registry.insert(system_a).unwrap().writes::<ResA>().parallel(system_b);
+    registry.insert(system_b).unwrap().writes::<ResA>().parallel(system_a);
+    assert!(registry.sort().is_err());
+}
+
+#[test]
 fn balancing() {
     env_logger::Builder::from_default_env()
         .is_test(true)

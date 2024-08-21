@@ -43,3 +43,19 @@ fn outside() {
     assert!(!world.dispatched());
     assert_eq!(*world.get::<i32>().unwrap(), 1);
 }
+
+#[test]
+fn err() {
+    env_logger::Builder::from_default_env()
+        .is_test(true)
+        .filter_level(log::LevelFilter::Debug)
+        .try_init();
+
+    let mut registry = Registry::default();
+
+    registry.insert(system_a).unwrap();
+    assert!(registry.insert(system_a).is_err());
+    
+    registry.insert(|_| {}).unwrap();
+    registry.insert(|_| {}).unwrap();
+}
